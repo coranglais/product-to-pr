@@ -1,13 +1,10 @@
-import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { promisify } from "node:util";
 
+import { runCommand, spawnCommand } from "./command.js";
 import type {
   AutomatedImplementationProvider,
 } from "./provider.js";
-
-const execFileAsync = promisify(execFile);
 
 type ImplementationBinding = {
   branch: string;
@@ -43,11 +40,7 @@ function readBinding(packageContent: string): ImplementationBinding {
 }
 
 async function git(repositoryPath: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync(
-    "git",
-    ["-C", repositoryPath, ...args],
-    { encoding: "utf8" },
-  );
+  const { stdout } = await runCommand("git", ["-C", repositoryPath, ...args]);
   return stdout.trim();
 }
 
@@ -149,7 +142,7 @@ async function runImplementationCommand(
   prompt: string,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(
+    const child = spawnCommand(
       implementationCommand.command,
       implementationCommand.args,
       {

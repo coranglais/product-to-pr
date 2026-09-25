@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+
+import { runCommand } from "./command.js";
 
 import {
   buildImplementationCommand,
@@ -14,10 +14,8 @@ import {
   runCodexImplementation,
 } from "./execute.js";
 
-const execFileAsync = promisify(execFile);
-
 async function git(repositoryPath: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync(
+  const { stdout } = await runCommand(
     "git",
     ["-C", repositoryPath, ...args],
     { encoding: "utf8" },

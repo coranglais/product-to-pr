@@ -1,8 +1,8 @@
-import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { spawnCommand } from "./command.js";
 import type { ProductReasoning, RepositoryOverview } from "./plan.js";
 
 const reasoningSchema = {
@@ -124,7 +124,7 @@ export async function reasonAboutFeature(
     await writeFile(schemaPath, JSON.stringify(reasoningSchema), "utf8");
     await new Promise<void>((resolve, reject) => {
       const timeoutMilliseconds = 120_000;
-      const child = spawn(
+      const child = spawnCommand(
         "codex",
         [
           "exec",

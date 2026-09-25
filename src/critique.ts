@@ -1,8 +1,8 @@
-import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { spawnCommand } from "./command.js";
 import type { EvaluationReport } from "./evaluation.js";
 import type { ProductPlan } from "./plan.js";
 import type {
@@ -258,7 +258,7 @@ async function executeCritiqueCommand(
   prompt: string,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command.command, command.args, {
+    const child = spawnCommand(command.command, command.args, {
       ...(command.cwd ? { cwd: command.cwd } : {}),
       stdio: ["pipe", "pipe", "pipe"],
     });

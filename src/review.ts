@@ -1,14 +1,11 @@
-import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 
+import { runCommand, spawnCommand } from "./command.js";
 import type { ProductPlan } from "./plan.js";
 import type { VerificationResult } from "./verify.js";
-
-const execFileAsync = promisify(execFile);
 
 export type AcceptanceResult = {
   criterion: string;
@@ -103,7 +100,7 @@ export async function reviewAcceptanceWithCodex(
   try {
     await writeFile(schemaPath, JSON.stringify(acceptanceSchema));
     await new Promise<void>((resolve, reject) => {
-      const child = spawn(
+      const child = spawnCommand(
         "codex",
         [
           "exec", "--ephemeral", "--ignore-user-config", "--sandbox", "read-only",
@@ -151,8 +148,7 @@ function normalizeAcceptance(
 }
 
 async function git(repositoryPath: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync("git", ["-C", repositoryPath, ...args], {
-    encoding: "utf8",
+  const { stdout } = await runCommand("git", ["-C", repositoryPath, ...args], {
     maxBuffer: 2_000_000,
   });
   return stdout.replace(/\n$/, "");
