@@ -160,39 +160,103 @@ export function spawnCommand(
   });
 }
 
+export type TimeoutOptions = { timeoutMilliseconds?: number };
+
+// "10 minutes" for the defaults the callers use; "3 seconds" when a test
+// injects a short timeout.
+export function formatTimeout(milliseconds: number): string {
+  const unit = milliseconds % 60_000 === 0 && milliseconds > 0
+    ? { count: milliseconds / 60_000, name: "minute" }
+    : { count: Math.max(1, Math.round(milliseconds / 1_000)), name: "second" };
+  return `${unit.count} ${unit.name}${unit.count === 1 ? "" : "s"}`;
+}
+
+function hasExited(child: ChildProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+// Stops a child and everything it started. On Windows a shim runs as
+// cmd.exe -> tool.cmd -> node, and `child.kill()` only reaches cmd.exe, so the
+// real tool (Codex, Claude Code, npm, a verification command) would keep
+// running after Product-to-PR reported a timeout. `taskkill /T` walks the
+// tree. This never throws: a tree that already exited is the desired state,
+// and the caller still reports its own timeout error.
+export async function killTree(
+  child: ChildProcess,
+  signal: NodeJS.Signals = "SIGTERM",
+): Promise<void> {
+  if (child.pid === undefined || hasExited(child)) return;
+  if (process.platform !== "win32") {
+    child.kill(signal);
+    return;
+  }
+  try {
+    await execFileAsync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
+  } catch {
+    if (!hasExited(child)) child.kill(signal);
+  }
+}
+
 export async function runCommand(
   command: string,
   args: readonly string[],
   options: ExecFileOptions = {},
 ): Promise<CommandResult> {
+  // `execFile`'s own `timeout` signals only the direct child, which on Windows
+  // is the cmd.exe wrapper. Run the timer here so the whole tree is stopped.
+  const { timeout, ...executeOptions } = options;
   const launch = resolveLaunch(command, args, {
     cwd: typeof options.cwd === "string" ? options.cwd : undefined,
     environment: options.env,
   });
   const running = execFileAsync(launch.file, launch.args, {
     encoding: "utf8",
-    ...options,
+    ...executeOptions,
     windowsVerbatimArguments: launch.windowsVerbatimArguments,
   });
   // No caller writes to stdin; closing it prevents a child that reads stdin
   // from waiting forever.
   running.child.stdin?.end();
+  let timedOut = false;
+  const timer = timeout && timeout > 0
+    ? setTimeout(() => {
+      timedOut = true;
+      void killTree(running.child);
+    }, timeout)
+    : undefined;
   try {
     const { stdout, stderr } = await running;
     return { stdout: String(stdout), stderr: String(stderr) };
   } catch (error) {
-    throw describeFailure(error, command, args);
+    throw describeFailure(error, command, args, timedOut);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
 // Node reports the command it actually ran. When that was cmd.exe wrapping a
-// shim, users should still see the tool they asked for, not the wrapper.
-function describeFailure(error: unknown, command: string, args: readonly string[]): unknown {
+// shim, users should still see the tool they asked for, not the wrapper. A
+// timeout is reported the way `execFile`'s own timeout reports it: `killed`
+// with the signal that was requested.
+function describeFailure(
+  error: unknown,
+  command: string,
+  args: readonly string[],
+  timedOut: boolean,
+): unknown {
   if (!(error instanceof Error)) return error;
+  const failure = error as CommandFailure;
+  if (timedOut) {
+    failure.killed = true;
+    failure.signal = "SIGTERM";
+  }
   const prefix = "Command failed: ";
-  if (!error.message.startsWith(prefix)) return error;
-  const newline = error.message.indexOf("\n");
-  const rest = newline === -1 ? "" : error.message.slice(newline);
-  error.message = `${prefix}${[command, ...args].join(" ")}${rest}`;
-  return error;
+  if (!failure.message.startsWith(prefix)) return failure;
+  const newline = failure.message.indexOf("\n");
+  const rest = newline === -1 ? "" : failure.message.slice(newline);
+  failure.message = `${prefix}${[command, ...args].join(" ")}${rest}`;
+  return failure;
 }

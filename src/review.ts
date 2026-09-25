@@ -3,7 +3,13 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { runCommand, spawnCommand } from "./command.js";
+import {
+  formatTimeout,
+  killTree,
+  runCommand,
+  spawnCommand,
+  type TimeoutOptions,
+} from "./command.js";
 import type { ProductPlan } from "./plan.js";
 import type { VerificationResult } from "./verify.js";
 
@@ -92,7 +98,9 @@ export function buildAcceptancePrompt(
 
 export async function reviewAcceptanceWithCodex(
   prompt: string,
+  options: TimeoutOptions = {},
 ): Promise<AcceptanceResult[]> {
+  const timeoutMilliseconds = options.timeoutMilliseconds ?? 120_000;
   const directory = await mkdtemp(join(tmpdir(), "product-to-pr-review-"));
   const schemaPath = join(directory, "schema.json");
   const outputPath = join(directory, "result.json");
@@ -110,18 +118,26 @@ export async function reviewAcceptanceWithCodex(
         { stdio: ["pipe", "ignore", "pipe"] },
       );
       let errors = "";
+      let timedOut = false;
+      const timeoutError = new Error(
+        `Acceptance review timed out after ${formatTimeout(timeoutMilliseconds)}.`,
+      );
       const timeout = setTimeout(() => {
-        child.kill("SIGTERM");
-        reject(new Error("Acceptance review timed out after 2 minutes."));
-      }, 120_000);
+        timedOut = true;
+        void killTree(child).then(() => reject(timeoutError));
+      }, timeoutMilliseconds);
       child.stderr.setEncoding("utf8");
       child.stderr.on("data", (chunk: string) => { errors += chunk; });
       child.on("error", reject);
       child.on("close", (code) => {
         clearTimeout(timeout);
-        code === 0
-          ? resolve()
-          : reject(new Error(errors.trim() || `Codex exited with status ${code}.`));
+        if (timedOut) {
+          reject(timeoutError);
+        } else if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(errors.trim() || `Codex exited with status ${code}.`));
+        }
       });
       child.stdin.end(prompt);
     });

@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
-import { runCommand, spawnCommand } from "./command.js";
+import {
+  formatTimeout,
+  killTree,
+  runCommand,
+  spawnCommand,
+  type TimeoutOptions,
+} from "./command.js";
 import type {
   AutomatedImplementationProvider,
 } from "./provider.js";
@@ -71,23 +77,29 @@ export function buildImplementationPrompt(
   ].join("\n");
 }
 
+const implementationTimeoutMilliseconds = 600_000;
+
 export async function runCodexImplementation(
   repositoryPath: string,
   prompt: string,
+  options: TimeoutOptions = {},
 ): Promise<string> {
   return runImplementationCommand(
     buildImplementationCommand("codex", repositoryPath),
     prompt,
+    options.timeoutMilliseconds ?? implementationTimeoutMilliseconds,
   );
 }
 
 export async function runClaudeImplementation(
   repositoryPath: string,
   prompt: string,
+  options: TimeoutOptions = {},
 ): Promise<string> {
   return runImplementationCommand(
     buildImplementationCommand("claude", repositoryPath),
     prompt,
+    options.timeoutMilliseconds ?? implementationTimeoutMilliseconds,
   );
 }
 
@@ -140,6 +152,7 @@ export function implementationRunnerFor(
 async function runImplementationCommand(
   implementationCommand: ImplementationCommand,
   prompt: string,
+  timeoutMilliseconds: number,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawnCommand(
@@ -154,14 +167,16 @@ async function runImplementationCommand(
     );
     let output = "";
     let errorOutput = "";
+    // Once the tree is killed the child closes with a non-zero status; the
+    // close handler must report the timeout, not that status.
+    let timedOut = false;
+    const timeoutError = new Error(
+      `${implementationCommand.label} implementation timed out after ${formatTimeout(timeoutMilliseconds)}.`,
+    );
     const timeout = setTimeout(() => {
-      child.kill("SIGTERM");
-      reject(
-        new Error(
-          `${implementationCommand.label} implementation timed out after 10 minutes.`,
-        ),
-      );
-    }, 600_000);
+      timedOut = true;
+      void killTree(child).then(() => reject(timeoutError));
+    }, timeoutMilliseconds);
 
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
@@ -174,7 +189,9 @@ async function runImplementationCommand(
     child.on("error", reject);
     child.on("close", (code) => {
       clearTimeout(timeout);
-      if (code === 0) {
+      if (timedOut) {
+        reject(timeoutError);
+      } else if (code === 0) {
         resolve(output.trim());
       } else {
         reject(

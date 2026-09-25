@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -136,4 +136,34 @@ describe.runIf(process.platform === "win32")("Windows .cmd shims", () => {
     });
     expect(JSON.parse(output.trim())).toEqual(["from-spawn"]);
   });
+
+  it("terminates the whole process tree when runCommand times out", async () => {
+    const directory = await shimDirectory();
+    // The shim starts a Node grandchild that records its pid and then lingers,
+    // the shape of a Codex, Claude Code, or npm run behind cmd.exe.
+    await writeFile(
+      join(directory, "linger.cmd"),
+      "@node -e \"require('fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)\" %*\r\n",
+    );
+    const pidFile = join(directory, "grandchild.pid");
+
+    await expect(
+      runCommand("linger", [pidFile], { env: environmentWithShim(directory), timeout: 3_000 }),
+    ).rejects.toMatchObject({ killed: true, signal: "SIGTERM" });
+
+    const pid = Number(await readFile(pidFile, "utf8"));
+    expect(pid).toBeGreaterThan(0);
+    expect(pid).not.toBe(process.pid);
+    await expect.poll(
+      () => {
+        try {
+          process.kill(pid, 0);
+          return "alive";
+        } catch (error) {
+          return (error as NodeJS.ErrnoException).code;
+        }
+      },
+      { timeout: 5_000, interval: 100 },
+    ).toBe("ESRCH");
+  }, 15_000);
 });
