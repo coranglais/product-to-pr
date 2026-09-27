@@ -7,7 +7,8 @@ on:
       - main
 
 jobs:
-  verify:
+  platform:
+    name: verify (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -31,3 +32,13 @@ jobs:
 
       - name: Run TypeScript typecheck
         run: npm run typecheck
+
+  verify:
+    if: ${{ always() }}
+    needs: platform
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm all platform checks passed
+        env:
+          PLATFORM_RESULT: ${{ needs.platform.result }}
+        run: test "$PLATFORM_RESULT" = "success"
