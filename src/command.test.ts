@@ -46,7 +46,9 @@ describe("resolveLaunch", () => {
     const directory = await shimDirectory();
     const environment = {
       PATH: directory,
-      PATHEXT: ".EXE;.CMD",
+      // Lowercase keeps this Windows simulation valid on case-sensitive
+      // Linux filesystems; real Windows resolves PATHEXT case-insensitively.
+      PATHEXT: ".exe;.cmd",
       ComSpec: "C:\\Windows\\system32\\cmd.exe",
     };
     const options = { platform: "win32" as const, environment, cwd: tmpdir() };
