@@ -154,16 +154,12 @@ describe.runIf(process.platform === "win32")("Windows .cmd shims", () => {
     const pid = Number(await readFile(pidFile, "utf8"));
     expect(pid).toBeGreaterThan(0);
     expect(pid).not.toBe(process.pid);
-    await expect.poll(
-      () => {
-        try {
-          process.kill(pid, 0);
-          return "alive";
-        } catch (error) {
-          return (error as NodeJS.ErrnoException).code;
-        }
-      },
-      { timeout: 5_000, interval: 100 },
-    ).toBe("ESRCH");
+    let status = "alive";
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      status = (error as NodeJS.ErrnoException).code ?? "unknown";
+    }
+    expect(status).toBe("ESRCH");
   }, 15_000);
 });

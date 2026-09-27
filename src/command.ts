@@ -175,6 +175,13 @@ function hasExited(child: ChildProcess): boolean {
   return child.exitCode !== null || child.signalCode !== null;
 }
 
+function waitForExit(child: ChildProcess): Promise<void> {
+  if (hasExited(child)) return Promise.resolve();
+  return new Promise((resolve) => {
+    child.once("close", () => resolve());
+  });
+}
+
 // Stops a child and everything it started. On Windows a shim runs as
 // cmd.exe -> tool.cmd -> node, and `child.kill()` only reaches cmd.exe, so the
 // real tool (Codex, Claude Code, npm, a verification command) would keep
@@ -186,8 +193,10 @@ export async function killTree(
   signal: NodeJS.Signals = "SIGTERM",
 ): Promise<void> {
   if (child.pid === undefined || hasExited(child)) return;
+  const exited = waitForExit(child);
   if (process.platform !== "win32") {
     child.kill(signal);
+    await exited;
     return;
   }
   try {
@@ -195,8 +204,13 @@ export async function killTree(
       encoding: "utf8",
       windowsHide: true,
     });
-  } catch {
+    await exited;
+  } catch (error) {
     if (!hasExited(child)) child.kill(signal);
+    throw new Error(
+      "Product-to-PR could not confirm that the timed-out Windows process tree stopped. Stop it manually before continuing.",
+      { cause: error },
+    );
   }
 }
 
@@ -221,16 +235,22 @@ export async function runCommand(
   // from waiting forever.
   running.child.stdin?.end();
   let timedOut = false;
+  let termination: Promise<void> | undefined;
   const timer = timeout && timeout > 0
     ? setTimeout(() => {
       timedOut = true;
-      void killTree(running.child);
+      termination = killTree(running.child);
+      // `execFile` normally rejects when the killed wrapper closes. Attach a
+      // handler immediately as well so a failed `taskkill` cannot become an
+      // unhandled rejection before that happens.
+      void termination.catch(() => undefined);
     }, timeout)
     : undefined;
   try {
     const { stdout, stderr } = await running;
     return { stdout: String(stdout), stderr: String(stderr) };
   } catch (error) {
+    if (termination) await termination;
     throw describeFailure(error, command, args, timedOut);
   } finally {
     if (timer) clearTimeout(timer);

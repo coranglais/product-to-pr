@@ -175,7 +175,10 @@ async function runImplementationCommand(
     );
     const timeout = setTimeout(() => {
       timedOut = true;
-      void killTree(child).then(() => reject(timeoutError));
+      void killTree(child).then(
+        () => reject(timeoutError),
+        (error) => reject(error),
+      );
     }, timeoutMilliseconds);
 
     child.stdout.setEncoding("utf8");
@@ -190,7 +193,7 @@ async function runImplementationCommand(
     child.on("close", (code) => {
       clearTimeout(timeout);
       if (timedOut) {
-        reject(timeoutError);
+        return;
       } else if (code === 0) {
         resolve(output.trim());
       } else {

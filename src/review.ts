@@ -124,7 +124,10 @@ export async function reviewAcceptanceWithCodex(
       );
       const timeout = setTimeout(() => {
         timedOut = true;
-        void killTree(child).then(() => reject(timeoutError));
+        void killTree(child).then(
+          () => reject(timeoutError),
+          (error) => reject(error),
+        );
       }, timeoutMilliseconds);
       child.stderr.setEncoding("utf8");
       child.stderr.on("data", (chunk: string) => { errors += chunk; });
@@ -132,7 +135,7 @@ export async function reviewAcceptanceWithCodex(
       child.on("close", (code) => {
         clearTimeout(timeout);
         if (timedOut) {
-          reject(timeoutError);
+          return;
         } else if (code === 0) {
           resolve();
         } else {

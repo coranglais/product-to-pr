@@ -158,7 +158,10 @@ export async function reasonAboutFeature(
       );
       const timeout = setTimeout(() => {
         timedOut = true;
-        void killTree(child).then(() => reject(timeoutError));
+        void killTree(child).then(
+          () => reject(timeoutError),
+          (error) => reject(error),
+        );
       }, timeoutMilliseconds);
 
       child.stderr.setEncoding("utf8");
@@ -169,7 +172,7 @@ export async function reasonAboutFeature(
       child.on("close", (code) => {
         clearTimeout(timeout);
         if (timedOut) {
-          reject(timeoutError);
+          return;
         } else if (code === 0) {
           resolve();
         } else {
